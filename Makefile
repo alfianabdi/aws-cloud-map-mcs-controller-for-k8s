@@ -3,7 +3,7 @@ GIT_TAG:=$(shell git describe --dirty --always --tags)
 PKG:=github.com/aws/aws-cloud-map-mcs-controller-for-k8s/pkg/version
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= ghcr.io/alfianabdi/aws-cloud-map-mcs-controller-for-k8s:${GIT_COMMIT}
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
 # AWS Region

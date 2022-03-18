@@ -153,6 +153,23 @@ func (r *CloudMapReconciler) reconcileService(ctx context.Context, svc *model.Se
 		return err
 	}
 
+	derivedEndpoints, err := r.getDerivedV1Endpoints(ctx, svc.Namespace, svcImport.Annotations[DerivedServiceAnnotation])
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+
+		// create derived Endpoints if it doesn't exist
+		if derivedEndpoints, err = r.createAndGetDerivedV1Endpoints(ctx, svcImport, svc.Endpoints); err != nil {
+			return err
+		}
+	}
+
+	// update derived endpoints to match imported
+	if err = r.updateDerivedV1Endpoints(ctx, derivedEndpoints, svc.Endpoints); err != nil {
+		return err
+	}
+
 	return r.updateEndpointSlices(ctx, svcImport, svc.Endpoints, derivedService)
 }
 
@@ -299,6 +316,45 @@ func (r *CloudMapReconciler) updateDerivedService(ctx context.Context, svc *v1.S
 		}
 		r.Log.Info("updated derived Service",
 			"namespace", svc.Namespace, "name", svc.Name, "ports", svc.Spec.Ports)
+	}
+
+	return nil
+}
+
+func (r *CloudMapReconciler) getDerivedV1Endpoints(ctx context.Context, namespace string, name string) (*v1.Endpoints, error) {
+	existingV1Endpoints := &v1.Endpoints{}
+	err := r.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existingV1Endpoints)
+	return existingV1Endpoints, err
+}
+
+func (r *CloudMapReconciler) createAndGetDerivedV1Endpoints(ctx context.Context, svcImport *v1alpha1.ServiceImport, desiredEndpoints []*model.Endpoint) (*v1.Endpoints, error) {
+	subsets := EndpointsToV1EndpointSubsets(desiredEndpoints)
+	toCreate := CreateDerivedV1EndpointsStruct(svcImport, subsets)
+	if err := r.Client.Create(ctx, toCreate); err != nil {
+		return nil, err
+	}
+	r.Log.Info("created derived Service", "namespace", toCreate.Namespace, "name", toCreate.Name)
+
+	return r.getDerivedV1Endpoints(ctx, toCreate.Namespace, svcImport.Annotations[DerivedServiceAnnotation])
+}
+
+func (r *CloudMapReconciler) updateDerivedV1Endpoints(ctx context.Context, endpoints *v1.Endpoints, desiredEndpoints []*model.Endpoint) error {
+	desiredEndpointIPs := ExtractEndpointIPs(desiredEndpoints)
+	desiredEndpointPorts := ExtractEndpointPorts(desiredEndpoints)
+
+	v1EndpointIPs := ExtractV1EndpointIPs(endpoints.Subsets)
+	v1EndpointPorts := ExtractV1EndpointPorts(endpoints.Subsets)
+
+	ipsMatch := IPsEqualIgnoreOrder(desiredEndpointIPs, v1EndpointIPs)
+	portsMatch := PortsEqualIgnoreOrder(desiredEndpointPorts, v1EndpointPorts)
+
+	if !(ipsMatch && portsMatch) {
+		subsets := EndpointsToV1EndpointSubsets(desiredEndpoints)
+		endpoints.Subsets = subsets
+		if err := r.Client.Update(ctx, endpoints); err != nil {
+			return err
+		}
+		r.Log.Info("updated derived endpoints")
 	}
 
 	return nil
