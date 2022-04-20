@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -485,6 +486,130 @@ func TestCreateServiceImportStruct(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := CreateServiceImportStruct(test.HttpNsName, test.SvcName, tt.args.servicePorts); !reflect.DeepEqual(*got, tt.want) {
 				t.Errorf("CreateServiceImportStruct() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractEndpointIPs(t *testing.T) {
+	type args struct {
+		endpoints []*model.Endpoint
+	}
+	tests := []struct {
+		name string
+		args args
+		want []string
+	}{
+		{
+			name: "unique ips extracted",
+			args: args{
+				endpoints: []*model.Endpoint{
+					{
+						IP: test.EndptIp1, EndpointPort: model.Port{Protocol: test.Protocol1, Port: test.Port1},
+					},
+					{
+						IP: test.EndptIp2, EndpointPort: model.Port{Protocol: test.Protocol2, Port: test.Port2},
+					},
+				},
+			},
+			want: []string{
+				test.EndptIp1,
+				test.EndptIp2,
+			},
+		},
+		{
+			name: "duplicate and service ports ignored",
+			args: args{
+				endpoints: []*model.Endpoint{
+					{
+						IP: test.EndptIp1, EndpointPort: model.Port{Protocol: test.Protocol1, Port: test.Port1},
+						ServicePort: model.Port{Protocol: test.Protocol1, Port: test.Port1},
+					},
+					{
+						IP: test.EndptIp1, EndpointPort: model.Port{Protocol: test.Protocol1, Port: test.Port1},
+						ServicePort: model.Port{Protocol: test.Protocol2, Port: test.Port2},
+					},
+				},
+			},
+			want: []string{test.EndptIp1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractEndpointIPs(tt.args.endpoints); !IPsEqualIgnoreOrder(got, tt.want) {
+				fmt.Println(got)
+				fmt.Println(tt.want)
+				t.Errorf("ServicePortToPort() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractV1EndpointIPs(t *testing.T) {
+	type args struct {
+		subsets []v1.EndpointSubset
+	}
+	tests := []struct {
+		name string
+		args args
+		want []string
+	}{
+		{
+			name: "unique ips extracted",
+			args: args{
+				subsets: []v1.EndpointSubset{
+					{
+						Addresses: []v1.EndpointAddress{
+							v1.EndpointAddress{
+								IP: test.EndptIp1,
+							},
+							v1.EndpointAddress{
+								IP: test.EndptIp2,
+							},
+						},
+						Ports: []v1.EndpointPort{
+							v1.EndpointPort{
+								Port: test.Port1,
+							},
+						},
+					},
+				},
+			},
+			want: []string{
+				test.EndptIp1,
+				test.EndptIp2,
+			},
+		},
+		{
+			name: "duplicate ips ignored",
+			args: args{
+				subsets: []v1.EndpointSubset{
+					{
+						Addresses: []v1.EndpointAddress{
+							v1.EndpointAddress{
+								IP: test.EndptIp1,
+							},
+							v1.EndpointAddress{
+								IP: test.EndptIp1,
+							},
+						},
+						Ports: []v1.EndpointPort{
+							v1.EndpointPort{
+								Port: test.Port1,
+							},
+						},
+					},
+				},
+			},
+			want: []string{test.EndptIp1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractV1EndpointIPs(tt.args.subsets); !IPsEqualIgnoreOrder(got, tt.want) {
+				fmt.Println(got)
+				fmt.Println(tt.want)
+				t.Errorf("ServicePortToPort() = %v, want %v", got, tt.want)
 			}
 		})
 	}

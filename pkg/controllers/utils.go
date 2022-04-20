@@ -216,3 +216,141 @@ func CreateEndpointSliceStruct(svc *v1.Service, svcImportName string) *discovery
 		AddressType: discovery.AddressTypeIPv4,
 	}
 }
+
+// Function to support V1 endpoint mirroring
+
+// PortToEndpointPort converts an internal model port to a k8s endpoint port
+func portToV1EndpointPort(port model.Port) v1.EndpointPort {
+	protocol := v1.Protocol(port.Protocol)
+	return v1.EndpointPort{
+		Name:     port.Name,
+		Protocol: protocol,
+		Port:     port.Port,
+	}
+}
+
+// EndpointPortToPort converts a k8s v1 endpoint port to an internal model port
+func v1EndpointPortToPort(port v1.EndpointPort) model.Port {
+	return model.Port{
+		Name:     port.Name,
+		Port:     port.Port,
+		Protocol: string(port.Protocol),
+	}
+}
+
+func ipToV1EndpointAddress(ip string) v1.EndpointAddress {
+	return v1.EndpointAddress{
+		IP: ip,
+	}
+}
+
+func EndpointsToV1EndpointSubsets(endpoints []*model.Endpoint) (subsets []v1.EndpointSubset) {
+	endpointIPs := ExtractEndpointIPs(endpoints)
+	endpointPorts := ExtractEndpointPorts(endpoints)
+
+	addresses := make([]v1.EndpointAddress, 0)
+	ports := make([]v1.EndpointPort, 0)
+
+	for _, ip := range endpointIPs {
+		address := ipToV1EndpointAddress(ip)
+		addresses = append(addresses, address)
+	}
+	for _, port := range endpointPorts {
+		port := portToV1EndpointPort(*port)
+		ports = append(ports, port)
+	}
+
+	subsets = createV1EndpointSubsets(addresses, ports)
+	return subsets
+}
+
+// ExtractV1EndpointIPs extracts all IP from V1 Endpoints
+func ExtractV1EndpointIPs(subsets []v1.EndpointSubset) []string {
+	ips := make([]string, 0)
+	ipMap := make(map[string]string)
+	if len(subsets) == 0 {
+		return ips
+	}
+	if len(subsets[0].Addresses) == 0 {
+		return ips
+	}
+	for _, address := range subsets[0].Addresses {
+		ipMap[address.IP] = address.IP
+	}
+	for _, ip := range ipMap {
+		ips = append(ips, ip)
+	}
+	return ips
+}
+
+// ExtractV1EndpointPorts extracts model port from v1 endpoints
+func ExtractV1EndpointPorts(subsets []v1.EndpointSubset) []*model.Port {
+	ports := make([]*model.Port, 0)
+	if len(subsets) == 0 {
+		return ports
+	}
+	for _, v1EndpointPort := range subsets[0].Ports {
+		port := v1EndpointPortToPort(v1EndpointPort)
+		ports = append(ports, &port)
+	}
+	return ports
+}
+
+func ExtractEndpointIPs(endpoints []*model.Endpoint) (endpointIPs []string) {
+	uniqueIPs := make(map[string]string)
+	for _, ep := range endpoints {
+		uniqueIPs[ep.IP] = ep.IP
+	}
+	for _, endpointIP := range uniqueIPs {
+		endpointIPs = append(endpointIPs, endpointIP)
+	}
+	return endpointIPs
+}
+
+func IPsEqualIgnoreOrder(a, b []string) (equal bool) {
+	if len(a) != len(b) {
+		return false
+	}
+
+	aMap := make(map[string]string)
+	for _, ipA := range a {
+		aMap[ipA] = ipA
+	}
+
+	for _, ipB := range b {
+		ipA, found := aMap[ipB]
+		if !found {
+			return false
+		}
+		if ipB != ipA {
+			return false
+		}
+	}
+	return true
+}
+
+func createV1EndpointSubsets(addresses []v1.EndpointAddress, ports []v1.EndpointPort) (subsets []v1.EndpointSubset) {
+	subset := v1.EndpointSubset{
+		Addresses: addresses,
+		Ports:     ports,
+	}
+	subsets = append(subsets, subset)
+	return subsets
+}
+
+// CreateDerivedV1EndpointsStruct creates struct representation of a derived service
+func CreateDerivedV1EndpointsStruct(svcImport *v1alpha1.ServiceImport, subsets []v1.EndpointSubset) *v1.Endpoints {
+	ownerRef := metav1.NewControllerRef(svcImport, schema.GroupVersionKind{
+		Version: svcImport.TypeMeta.APIVersion,
+		Kind:    svcImport.TypeMeta.Kind,
+	})
+
+	return &v1.Endpoints{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:       svcImport.Namespace,
+			Name:            svcImport.Annotations[DerivedServiceAnnotation],
+			OwnerReferences: []metav1.OwnerReference{*ownerRef},
+		},
+		Subsets: subsets,
+	}
+}
